@@ -9,8 +9,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// ── SERVE YOUR HTML FILE ──
+// ── SERVE STATIC FILES FROM public/ FOLDER ──
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ── SERVE index.html FOR ROOT ROUTE ──
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // ── PROXY ROUTE: Anthropic API ──
 // Your chatbot calls THIS server instead of Anthropic directly.
@@ -42,10 +47,6 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// ── FALLBACK: serve index.html for all other routes ──
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 app.listen(PORT, () => {
   console.log(`✅ RBCCI Chatbot Server running on port ${PORT}`);
