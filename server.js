@@ -1,87 +1,94 @@
 const express = require('express');
 const path = require('path');
+const https = require('https'); // ✅ Built-in Node.js — works on ALL versions, no install needed
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ── MIDDLEWARE ──
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── HEALTH CHECK (visit /health to confirm server + API key status) ──
+// ── HEALTH CHECK ──
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     apiKeyLoaded: !!process.env.ANTHROPIC_API_KEY,
+    nodeVersion: process.version,
     timestamp: new Date().toISOString()
   });
 });
 
 // ── CHAT API ROUTE ──
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
-  // Guard: no API key
   if (!apiKey) {
-    console.error('ANTHROPIC_API_KEY is not set!');
-    return res.status(500).json({
-      error: { message: 'Server error: API key not configured.' }
-    });
+    console.error('[ERROR] ANTHROPIC_API_KEY not set');
+    return res.status(500).json({ error: { message: 'API key not configured on server.' } });
   }
 
   const { model, max_tokens, system, messages } = req.body;
 
-  // Guard: bad request body
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({
-      error: { message: 'Invalid request: messages array is required.' }
-    });
+    return res.status(400).json({ error: { message: 'Invalid request: messages array required.' } });
   }
 
-  try {
-    console.log(`[CHAT] Calling Anthropic | model=${model} | messages=${messages.length}`);
+  const bodyData = JSON.stringify({
+    model: model || 'claude-haiku-4-5-20251001',
+    max_tokens: max_tokens || 1000,
+    system: system || '',
+    messages: messages
+  });
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,              // ✅ Correct Anthropic auth
-        'anthropic-version': '2023-06-01' // ✅ Required by Anthropic
-      },
-      body: JSON.stringify({
-        model: model || 'claude-haiku-4-5-20251001',
-        max_tokens: max_tokens || 1000,
-        system: system || '',
-        messages: messages
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error(`[ANTHROPIC ERROR] ${response.status}:`, JSON.stringify(data));
-    } else {
-      console.log(`[CHAT] Success | tokens used: ${data.usage?.output_tokens}`);
+  const options = {
+    hostname: 'api.anthropic.com',
+    path: '/v1/messages',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(bodyData),
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
     }
+  };
 
-    // Forward Anthropic's response directly to the browser
-    res.status(response.status).json(data);
+  console.log(`[CHAT] Sending to Anthropic | model=${options.body} | msgs=${messages.length}`);
 
-  } catch (err) {
-    console.error('[FETCH ERROR]', err.message);
-    res.status(500).json({
-      error: { message: 'Could not reach Anthropic API: ' + err.message }
+  const request = https.request(options, (response) => {
+    let rawData = '';
+    response.on('data', (chunk) => { rawData += chunk; });
+    response.on('end', () => {
+      try {
+        const parsed = JSON.parse(rawData);
+        if (response.statusCode !== 200) {
+          console.error(`[ANTHROPIC ERROR] ${response.statusCode}:`, rawData);
+        } else {
+          console.log(`[CHAT] Success | output_tokens=${parsed.usage?.output_tokens}`);
+        }
+        res.status(response.statusCode).json(parsed);
+      } catch (e) {
+        console.error('[PARSE ERROR]', e.message, rawData);
+        res.status(500).json({ error: { message: 'Failed to parse Anthropic response.' } });
+      }
     });
-  }
+  });
+
+  request.on('error', (err) => {
+    console.error('[REQUEST ERROR]', err.message);
+    res.status(500).json({ error: { message: 'Network error: ' + err.message } });
+  });
+
+  request.write(bodyData);
+  request.end();
 });
 
-// ── FALLBACK: serve index.html for all other routes ──
+// ── FALLBACK ──
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ── START SERVER ──
 app.listen(PORT, () => {
   console.log(`✅ RBCCI Chatbot running on port ${PORT}`);
-  console.log(`🔑 API Key: ${process.env.ANTHROPIC_API_KEY ? 'LOADED ✓' : 'MISSING ✗ — set ANTHROPIC_API_KEY!'}`);
+  console.log(`🔑 API Key: ${process.env.ANTHROPIC_API_KEY ? 'LOADED ✓' : 'MISSING ✗'}`);
+  console.log(`📦 Node version: ${process.version}`);
 });
