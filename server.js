@@ -8,38 +8,45 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── HEALTH CHECK ──
+// ── HEALTH CHECK (visit /health to confirm server + API key status) ──
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    apiKeyLoaded: !!process.env.ANTHROPIC_API_KEY,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ── CHAT API ROUTE ──
 app.post('/api/chat', async (req, res) => {
-  // Check for API key
   const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // Guard: no API key
   if (!apiKey) {
-    console.error('ERROR: ANTHROPIC_API_KEY environment variable is not set!');
+    console.error('ANTHROPIC_API_KEY is not set!');
     return res.status(500).json({
-      error: { message: 'Server configuration error: API key not set.' }
+      error: { message: 'Server error: API key not configured.' }
     });
   }
 
   const { model, max_tokens, system, messages } = req.body;
 
-  // Validate request body
-  if (!messages || !Array.isArray(messages)) {
+  // Guard: bad request body
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({
       error: { message: 'Invalid request: messages array is required.' }
     });
   }
 
   try {
+    console.log(`[CHAT] Calling Anthropic | model=${model} | messages=${messages.length}`);
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
+        'x-api-key': apiKey,              // ✅ Correct Anthropic auth
+        'anthropic-version': '2023-06-01' // ✅ Required by Anthropic
       },
       body: JSON.stringify({
         model: model || 'claude-haiku-4-5-20251001',
@@ -51,13 +58,19 @@ app.post('/api/chat', async (req, res) => {
 
     const data = await response.json();
 
-    // Forward Anthropic's response (or error) directly to the client
+    if (!response.ok) {
+      console.error(`[ANTHROPIC ERROR] ${response.status}:`, JSON.stringify(data));
+    } else {
+      console.log(`[CHAT] Success | tokens used: ${data.usage?.output_tokens}`);
+    }
+
+    // Forward Anthropic's response directly to the browser
     res.status(response.status).json(data);
 
   } catch (err) {
-    console.error('Error calling Anthropic API:', err.message);
+    console.error('[FETCH ERROR]', err.message);
     res.status(500).json({
-      error: { message: 'Failed to reach Anthropic API. Please try again.' }
+      error: { message: 'Could not reach Anthropic API: ' + err.message }
     });
   }
 });
@@ -69,6 +82,6 @@ app.get('*', (req, res) => {
 
 // ── START SERVER ──
 app.listen(PORT, () => {
-  console.log(`✅ RBCCI Chatbot server running on port ${PORT}`);
-  console.log(`🔑 API Key loaded: ${process.env.ANTHROPIC_API_KEY ? 'YES ✓' : 'NO ✗ (set ANTHROPIC_API_KEY!)'}`);
+  console.log(`✅ RBCCI Chatbot running on port ${PORT}`);
+  console.log(`🔑 API Key: ${process.env.ANTHROPIC_API_KEY ? 'LOADED ✓' : 'MISSING ✗ — set ANTHROPIC_API_KEY!'}`);
 });
