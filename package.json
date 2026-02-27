@@ -1,16 +1,15 @@
 {
   "name": "rbcci-chatbot",
   "version": "1.0.0",
-  "description": "RBCCI AI Banking Assistant - Rural Bank of Calbayog City",
+  "description": "RBCCI AI Banking Assistant",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=14.0.0"
   }
 }
